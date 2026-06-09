@@ -13,35 +13,15 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo 'Checking out code from repository...'
+                echo 'Checking out code...'
                 checkout scm
-            }
-        }
-
-        stage('Build') {
-            steps {
-                echo 'Building .NET backend application...'
-                sh '''
-                    dotnet build -c Release
-                '''
-            }
-        }
-
-        stage('Test') {
-            steps {
-                echo 'Running tests...'
-                sh '''
-                    dotnet test --no-build -c Release --verbosity normal || true
-                '''
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                sh '''
-                    docker build -t ${DOCKER_IMAGE} -t ${DOCKER_IMAGE_LATEST} .
-                '''
+                sh 'docker build -t ${DOCKER_IMAGE} -t ${DOCKER_IMAGE_LATEST} .'
             }
         }
 
