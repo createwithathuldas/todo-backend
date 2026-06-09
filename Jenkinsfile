@@ -22,7 +22,6 @@ pipeline {
             steps {
                 echo 'Building .NET backend application...'
                 sh '''
-                    cd Todo-backend
                     dotnet build -c Release
                 '''
             }
@@ -32,7 +31,6 @@ pipeline {
             steps {
                 echo 'Running tests...'
                 sh '''
-                    cd Todo-backend
                     dotnet test --no-build -c Release --verbosity normal || true
                 '''
             }
@@ -42,7 +40,6 @@ pipeline {
             steps {
                 echo 'Building Docker image...'
                 sh '''
-                    cd Todo-backend
                     docker build -t ${DOCKER_IMAGE} -t ${DOCKER_IMAGE_LATEST} .
                 '''
             }
