@@ -1,0 +1,12 @@
+bin
+obj
+.git
+.gitignore
+.vs
+.vscode
+*.user
+*.suo
+**/node_modules
+dist
+coverage
+.DS_Store
