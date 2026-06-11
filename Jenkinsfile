@@ -1,103 +1,49 @@
 pipeline {
     agent any
-
+    environment {
+        ACR     = 'athulacr'
+        RG      = 'todo-rg'
+        AKS     = 'todo-aks'
+        IMAGE   = 'todo-backend'
+        AZ_CLIENT_ID     = credentials('azure-client-id')
+        AZ_CLIENT_SECRET = credentials('azure-client-secret')
+        AZ_TENANT_ID     = credentials('azure-tenant-id')
+    }
     stages {
-        stage('Checkout SCM') {
-            steps {
-                echo 'Checking out code from SCM...'
-                checkout scm
-            }
-        }
-
         stage('Checkout') {
+            steps { checkout scm }
+        }
+        stage('Build image') {
             steps {
-                echo 'Code checkout complete.'
+                bat 'docker build --platform linux/amd64 -t %ACR%.azurecr.io/%IMAGE%:%BUILD_NUMBER% -t %ACR%.azurecr.io/%IMAGE%:latest .'
             }
         }
-
-        stage('Build') {
+        stage('Login to Azure') {
             steps {
-                echo 'Building backend application...'
-                sh 'dotnet build -c Release'
+                bat 'az login --service-principal -u %AZ_CLIENT_ID% -p %AZ_CLIENT_SECRET% --tenant %AZ_TENANT_ID%'
+                bat 'az acr login -n %ACR%'
             }
         }
-
-        stage('Build Docker') {
+        stage('Push to ACR') {
             steps {
-                echo 'Building Docker image...'
-                sh 'docker build -t todo-backend:latest .'
+                bat 'docker push %ACR%.azurecr.io/%IMAGE%:%BUILD_NUMBER%'
+                bat 'docker push %ACR%.azurecr.io/%IMAGE%:latest'
             }
         }
-
-        stage('Start MySQL') {
+        stage('Deploy to AKS') {
             steps {
-                echo 'Starting MySQL container...'
-                sh '''
-                    docker network create todo-network || true
-                    docker stop todo-mysql || true
-                    docker rm todo-mysql || true
-                    docker run -d --name todo-mysql \
-                      --network todo-network \
-                      -p 3307:3306 \
-                      -e MYSQL_ROOT_PASSWORD=todopass \
-                      -e MYSQL_DATABASE=TodoDB \
-                      -v mysql_data:/var/lib/mysql \
-                      --health-cmd="mysqladmin ping -h localhost" \
-                      --health-interval=5s \
-                      --health-timeout=5s \
-                      --health-retries=5 \
-                      mysql:8.0
-                '''
-            }
-        }
-
-        stage('MySQL Health Check') {
-            steps {
-                echo 'Waiting for MySQL to be healthy...'
-                sh '''
-                    for i in {1..30}; do
-                        status=$(docker inspect --format='{{.State.Health.Status}}' todo-mysql 2>/dev/null || echo "failed")
-                        echo "Current MySQL status: $status"
-                        if [ "$status" = "healthy" ]; then
-                            echo "MySQL is healthy!"
-                            exit 0
-                        fi
-                        sleep 5
-                    done
-                    echo "MySQL failed to become healthy in time."
-                    exit 1
-                '''
-            }
-        }
-
-        stage('Run API') {
-            steps {
-                echo 'Starting backend API container...'
-                sh '''
-                    docker stop todo-backend-container || true
-                    docker rm todo-backend-container || true
-                    docker run -d --name todo-backend-container \
-                      --network todo-network \
-                      -p 5143:5143 \
-                      -e ConnectionStrings__DefaultConnection="Server=todo-mysql;Database=TodoDB;User=root;Password=todopass;" \
-                      -e Jwt__Key="your-super-secret-key-that-should-be-at-least-32-characters-long-for-hs256" \
-                      -e Jwt__Issuer="Todo.Backend" \
-                      -e Jwt__Audience="Todo.Frontend" \
-                      todo-backend:latest
-                '''
+                bat 'az aks get-credentials -n %AKS% -g %RG% --overwrite-existing'
+                powershell '(Get-Content k8s/02-api.yaml) -replace "athulacr", $env:ACR | Set-Content $env:TEMP\\02-api.yaml'
+                bat 'kubectl apply -f k8s/01-mysql.yaml'
+                bat 'kubectl apply -f %TEMP%\\02-api.yaml'
+                bat 'kubectl set image deployment/product-api product-api=%ACR%.azurecr.io/%IMAGE%:%BUILD_NUMBER%'
+                bat 'kubectl rollout status deployment/product-api --timeout=120s'
             }
         }
     }
-
     post {
-        always {
-            echo 'Pipeline execution completed.'
-        }
-        success {
-            echo 'Backend build and deployment successful!'
-        }
-        failure {
-            echo 'Backend build or deployment failed!'
-        }
+        success { echo "product-api ${BUILD_NUMBER} deployed to AKS." }
+        failure { echo 'product-api pipeline failed.' }
+        always  { bat 'az logout || exit 0' }
     }
 }
